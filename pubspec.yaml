@@ -46,6 +46,13 @@ flutter:
         pluginClass: HtmlToImageFlutterPlugin
       ios:
         pluginClass: HtmlToImageFlutterPlugin
+      macos:
+        pluginClass: HtmlToImageFlutterPlugin
+      windows:
+        pluginClass: HtmlToImageFlutterPlugin
+      linux:
+        pluginClass: HtmlToImageFlutterPlugin
+
 
 screenshots:
   - description: "Shows the html input field and convert buttons"
