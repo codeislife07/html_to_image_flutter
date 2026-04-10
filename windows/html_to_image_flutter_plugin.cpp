@@ -8,12 +8,24 @@
 //
 // No wil/com.h needed: uses Microsoft::WRL::ComPtr throughout.
 
+// <windows.h> MUST come first on Windows. Define NOMINMAX so that the
+// min/max macros from windows.h do not collide with std::min/std::max used
+// inside Flutter SDK headers.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <objbase.h>    // CreateStreamOnHGlobal, IStream
+#include <wrl.h>        // Microsoft::WRL::ComPtr, Callback
+
+// Plugin header (depends on <windows.h> being included above)
 #include "html_to_image_flutter_plugin.h"
 
-#include <windows.h>
-#include <objbase.h>     // CreateStreamOnHGlobal, IStream
-#include <wrl.h>         // Microsoft::WRL::ComPtr, Callback
-#include "WebView2.h"    // bundled: windows/WebView2.h + WebView2EnvironmentOptions.h
+// Bundled WebView2 SDK (windows/WebView2.h + WebView2EnvironmentOptions.h)
+#include "WebView2.h"
 
 #include <memory>
 #include <queue>
@@ -228,7 +240,15 @@ static void StartConversion(PendingReq req) {
         "<!DOCTYPE html><html><head>"
         "<meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<style>*{box-sizing:border-box;}html,body{margin:0;padding:0;}</style>"
+        "<style>"
+        ":root{color-scheme:light only;}"
+        "*{box-sizing:border-box;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;}"
+        "html,body{margin:0;padding:0;background:#FFFFFF !important;color:#111111 !important;}"
+        "body{font-family:\"Segoe UI\",Roboto,Arial,sans-serif;text-rendering:optimizeLegibility;overflow-wrap:break-word;word-wrap:break-word;}"
+        "img,svg,canvas,video{max-width:100%;height:auto;display:block;}"
+        "table{border-collapse:collapse;width:100%;}"
+        "a{color:#111111 !important;}"
+        "</style>"
         "</head><body>" + req.html + "</body></html>";
 
     std::wstring whtml       = ToWide(wrapped);

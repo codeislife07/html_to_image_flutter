@@ -66,6 +66,10 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 // Hardware-accelerated layers are not accessible via draw() on
                 // views that are not attached to a display surface.
                 setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                setBackgroundColor(android.graphics.Color.WHITE)
+                alpha = 0.01f
+                translationX = -10000f
+                translationY = -10000f
             }
 
             val targetWidth = width ?: getDisplaySize().width
@@ -76,15 +80,28 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                     <meta charset="utf-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
                     <style>
-                        * { box-sizing: border-box; }
-                        body {
+                        :root { color-scheme: light only; }
+                        * {
+                            box-sizing: border-box;
+                            -webkit-print-color-adjust: exact !important;
+                            print-color-adjust: exact !important;
+                        }
+                        html, body {
                             margin: 0; padding: 0;
+                            background: #FFFFFF !important;
+                            color: #111111 !important;
+                        }
+                        body {
                             width: 100%; max-width: ${targetWidth}px;
                             overflow-wrap: break-word;
                             word-wrap: break-word;
                             overflow: hidden;
+                            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+                            text-rendering: optimizeLegibility;
                         }
-                        img { max-width: 100%; height: auto; display: block; }
+                        img, svg, canvas, video { max-width: 100%; height: auto; display: block; }
+                        table { border-collapse: collapse; width: 100%; }
+                        a { color: #111111 !important; }
                     </style>
                 </head>
                 <body>$rawContent</body>
@@ -95,7 +112,13 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 override fun onPageFinished(view: WebView, url: String) {
                     // onPageFinished runs on the main thread; start the
                     // content-ready check directly from here.
-                    checkContentRendered(view, delay.toLong(), result, targetWidth)
+                    checkContentRendered(
+                        webView = view,
+                        waitMs = delay.toLong(),
+                        totalWaitMs = delay.toLong(),
+                        result = result,
+                        targetWidth = targetWidth,
+                    )
                 }
 
                 override fun onReceivedError(
@@ -113,7 +136,6 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             // live window hierarchy. Without this, draw() returns a white bitmap
             // regardless of the content.
             val decorView = activity.window.decorView as ViewGroup
-            webView.visibility = View.INVISIBLE
             decorView.addView(
                 webView,
                 ViewGroup.LayoutParams(targetWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -139,7 +161,8 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
 
     private fun checkContentRendered(
         webView: WebView,
-        delay: Long,
+        waitMs: Long,
+        totalWaitMs: Long,
         result: MethodChannel.Result,
         targetWidth: Int
     ) {
@@ -147,15 +170,25 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             webView.evaluateJavascript(
                 """
                 (function() {
+                    var body = document.body;
+                    var doc = document.documentElement;
                     var images = document.getElementsByTagName('img');
-                    var loaded = true;
+                    var imagesLoaded = true;
                     for (var i = 0; i < images.length; i++) {
-                        if (!images[i].complete) { loaded = false; break; }
+                        if (!images[i].complete) { imagesLoaded = false; break; }
                     }
+                    var fontsLoaded = true;
+                    if (document.fonts && document.fonts.status) {
+                        fontsLoaded = document.fonts.status === 'loaded';
+                    }
+                    var rects = body ? body.getClientRects() : [];
                     return {
-                        width: document.body.scrollWidth,
-                        height: document.body.scrollHeight,
-                        fullyLoaded: loaded
+                        width: Math.max(body ? body.scrollWidth : 0, doc ? doc.scrollWidth : 0),
+                        height: Math.max(body ? body.scrollHeight : 0, doc ? doc.scrollHeight : 0),
+                        hasLayout: rects && rects.length > 0,
+                        textLength: body && body.innerText ? body.innerText.trim().length : 0,
+                        imagesLoaded: imagesLoaded,
+                        fontsLoaded: fontsLoaded
                     };
                 })();
                 """
@@ -164,11 +197,24 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                     val json = JSONArray("[$value]").getJSONObject(0)
                     val contentWidth  = json.getDouble("width").absoluteValue.toInt()
                     val contentHeight = json.getDouble("height").absoluteValue.toInt()
-                    val fullyLoaded   = json.getBoolean("fullyLoaded")
+                    val hasLayout     = json.optBoolean("hasLayout", false)
+                    val textLength    = json.optInt("textLength", 0)
+                    val imagesLoaded  = json.optBoolean("imagesLoaded", true)
+                    val fontsLoaded   = json.optBoolean("fontsLoaded", true)
 
-                    if (!fullyLoaded && delay < 5000) {
-                        // Images still loading — retry up to 5 seconds total
-                        checkContentRendered(webView, delay + 500, result, targetWidth)
+                    val contentReady = contentWidth > 0 &&
+                        contentHeight > 0 &&
+                        hasLayout &&
+                        (textLength > 0 || imagesLoaded)
+
+                    if ((!contentReady || !imagesLoaded || !fontsLoaded) && totalWaitMs < 5000) {
+                        checkContentRendered(
+                            webView = webView,
+                            waitMs = 250L,
+                            totalWaitMs = totalWaitMs + 250L,
+                            result = result,
+                            targetWidth = targetWidth,
+                        )
                         return@evaluateJavascript
                     }
 
@@ -186,6 +232,7 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                         View.MeasureSpec.makeMeasureSpec(contentHeight, View.MeasureSpec.EXACTLY)
                     )
                     webView.layout(0, 0, w, contentHeight)
+                    webView.invalidate()
 
                     val bitmap = webView.toBitmap(w.toDouble(), contentHeight.toDouble())
                     removeFromWindow(webView)
@@ -200,7 +247,7 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                     result.error("EVALUATION_ERROR", "JS evaluation failed: ${e.message}", null)
                 }
             }
-        }, delay)
+        }, waitMs)
     }
 
     @Suppress("DEPRECATION")

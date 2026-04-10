@@ -1,8 +1,14 @@
 #ifndef FLUTTER_PLUGIN_HTML_TO_IMAGE_FLUTTER_PLUGIN_H_
 #define FLUTTER_PLUGIN_HTML_TO_IMAGE_FLUTTER_PLUGIN_H_
 
+// Flutter SDK headers — include all types this plugin uses explicitly,
+// because transitive inclusion varies across Flutter SDK versions.
+#include <flutter/encodable_value.h>
+#include <flutter/method_call.h>
 #include <flutter/method_channel.h>
+#include <flutter/method_result.h>
 #include <flutter/plugin_registrar_windows.h>
+#include <flutter/standard_method_codec.h>
 
 #include <memory>
 

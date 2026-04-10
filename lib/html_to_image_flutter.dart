@@ -1,5 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:html_to_image_flutter/html_to_image_flutter_platform_interface.dart';
+import 'package:html_to_image_flutter/config/config.dart';
+
+export 'package:html_to_image_flutter/config/config.dart';
 
 class HtmlToImage {
   /// Converts the given HTML asset file to an image.
@@ -14,12 +17,22 @@ class HtmlToImage {
     required String asset,
     Duration delay = const Duration(milliseconds: 200),
     int? width,
+    ImageMargins margins = const ImageMargins(),
+    bool useDeviceScaleFactor = false,
+    LayoutStrategy layoutStrategy = const LayoutStrategy.deviceDefault(),
+    CaptureStrategy captureStrategy = const CaptureStrategy.followLayout(),
+    WebViewConfiguration webViewConfiguration = const WebViewConfiguration(),
   }) async {
     final content = await rootBundle.loadString(asset);
     return HtmlToImagePlatform.instance.convertToImage(
       content: content,
       delay: delay,
       width: width,
+      margins: margins,
+      useDeviceScaleFactor: useDeviceScaleFactor,
+      layoutStrategy: layoutStrategy,
+      captureStrategy: captureStrategy,
+      webViewConfiguration: webViewConfiguration,
     );
   }
 
@@ -35,11 +48,21 @@ class HtmlToImage {
     required String content,
     Duration delay = const Duration(milliseconds: 200),
     int? width,
+    ImageMargins margins = const ImageMargins(),
+    bool useDeviceScaleFactor = false,
+    LayoutStrategy layoutStrategy = const LayoutStrategy.deviceDefault(),
+    CaptureStrategy captureStrategy = const CaptureStrategy.followLayout(),
+    WebViewConfiguration webViewConfiguration = const WebViewConfiguration(),
   }) {
     return HtmlToImagePlatform.instance.convertToImage(
       content: content,
       delay: delay,
       width: width,
+      margins: margins,
+      useDeviceScaleFactor: useDeviceScaleFactor,
+      layoutStrategy: layoutStrategy,
+      captureStrategy: captureStrategy,
+      webViewConfiguration: webViewConfiguration,
     );
   }
 
@@ -55,12 +78,22 @@ class HtmlToImage {
     required String content,
     Duration delay = const Duration(milliseconds: 200),
     int? width,
+    ImageMargins margins = const ImageMargins(),
+    bool useDeviceScaleFactor = false,
+    LayoutStrategy layoutStrategy = const LayoutStrategy.deviceDefault(),
+    CaptureStrategy captureStrategy = const CaptureStrategy.followLayout(),
+    WebViewConfiguration webViewConfiguration = const WebViewConfiguration(),
   }) async {
     try {
       return await HtmlToImagePlatform.instance.convertToImage(
         content: content,
         delay: delay,
         width: width,
+        margins: margins,
+        useDeviceScaleFactor: useDeviceScaleFactor,
+        layoutStrategy: layoutStrategy,
+        captureStrategy: captureStrategy,
+        webViewConfiguration: webViewConfiguration,
       );
     } catch (_) {
       return null;
