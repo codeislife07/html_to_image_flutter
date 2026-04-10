@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Size
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -19,9 +20,6 @@ import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import org.json.JSONArray
 import java.io.ByteArrayOutputStream
 import kotlin.math.absoluteValue
@@ -31,12 +29,15 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     private lateinit var channel: MethodChannel
     private lateinit var activity: Activity
     private lateinit var context: Context
-    private lateinit var webView: WebView
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "html_to_image_flutter")
         channel.setMethodCallHandler(this)
         context = flutterPluginBinding.applicationContext
+        // Must be called BEFORE any WebView instance is created.
+        // Enables software-based whole-document drawing so draw(canvas) captures
+        // the full content instead of returning a blank/white image.
+        WebView.enableSlowWholeDocumentDraw()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -44,12 +45,13 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
         val method = call.method
         val arguments = call.arguments as Map<*, *>
         val rawContent = arguments["content"] as String
-        val delay = arguments["delay"] as Int? ?: 500 // Increased default delay for reliability
+        val delay = arguments["delay"] as Int? ?: 500
         val width = arguments["width"] as Int?
 
         if (method == "convertToImage") {
-            webView = WebView(context).apply {
-                // Enable additional WebView settings for complex content
+            // Use Activity context (not application context) — required for
+            // WebView to access window token and render properly.
+            val webView = WebView(activity).apply {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
@@ -59,50 +61,41 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                 settings.allowContentAccess = true
                 isHorizontalScrollBarEnabled = false
                 isVerticalScrollBarEnabled = false
-                setInitialScale(100) // Ensure 1:1 scale for accurate rendering
+                setInitialScale(100)
+                // Force software rendering so draw(canvas) captures full content.
+                // Hardware-accelerated layers are not accessible via draw() on
+                // views that are not attached to a display surface.
+                setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             }
-            WebView.enableSlowWholeDocumentDraw()
 
-            val displaySize = getDisplaySize()
-            val targetWidth = width ?: displaySize.width
+            val targetWidth = width ?: getDisplaySize().width
 
             val fullHtml = """
-                <html>
+                <!DOCTYPE html><html>
                 <head>
+                    <meta charset="utf-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
                     <style>
+                        * { box-sizing: border-box; }
                         body {
-                            margin: 0;
-                            padding: 0;
-                            width: 100%;
-                            max-width: ${targetWidth}px;
+                            margin: 0; padding: 0;
+                            width: 100%; max-width: ${targetWidth}px;
                             overflow-wrap: break-word;
                             word-wrap: break-word;
-                            box-sizing: border-box;
                             overflow: hidden;
                         }
-                        img {
-                            max-width: 100%;
-                            height: auto;
-                            display: block;
-                        }
-                        * {
-                            box-sizing: border-box;
-                        }
+                        img { max-width: 100%; height: auto; display: block; }
                     </style>
                 </head>
-                <body>
-                    $rawContent
-                </body>
+                <body>$rawContent</body>
                 </html>
             """.trimIndent()
 
             webView.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
-                    CoroutineScope(Dispatchers.IO).launch {
-                        // Wait for content to be fully rendered
-                        checkContentRendered(view, delay.toLong(), result, targetWidth)
-                    }
+                    // onPageFinished runs on the main thread; start the
+                    // content-ready check directly from here.
+                    checkContentRendered(view, delay.toLong(), result, targetWidth)
                 }
 
                 override fun onReceivedError(
@@ -110,23 +103,46 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                     request: WebResourceRequest?,
                     error: WebResourceError?
                 ) {
-                    result.error("WEBVIEW_ERROR", "Failed to load content: ${error?.description}", null)
+                    removeFromWindow(webView)
+                    result.error("WEBVIEW_ERROR", "Failed to load: ${error?.description}", null)
                 }
             }
 
-            // Set initial size to avoid clipping
+            // ── Attach WebView to the Activity window BEFORE loading HTML ──────
+            // draw(canvas) only works correctly when the WebView is part of a
+            // live window hierarchy. Without this, draw() returns a white bitmap
+            // regardless of the content.
+            val decorView = activity.window.decorView as ViewGroup
+            webView.visibility = View.INVISIBLE
+            decorView.addView(
+                webView,
+                ViewGroup.LayoutParams(targetWidth, ViewGroup.LayoutParams.WRAP_CONTENT)
+            )
             webView.measure(
                 View.MeasureSpec.makeMeasureSpec(targetWidth, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
             )
             webView.layout(0, 0, targetWidth, webView.measuredHeight)
             webView.loadDataWithBaseURL(null, fullHtml, "text/html", "UTF-8", null)
+
         } else {
             result.notImplemented()
         }
     }
 
-    private fun checkContentRendered(webView: WebView, delay: Long, result: MethodChannel.Result, targetWidth: Int) {
+    // Remove WebView from the window after capture (or on error).
+    private fun removeFromWindow(webView: WebView) {
+        Handler(Looper.getMainLooper()).post {
+            (webView.parent as? ViewGroup)?.removeView(webView)
+        }
+    }
+
+    private fun checkContentRendered(
+        webView: WebView,
+        delay: Long,
+        result: MethodChannel.Result,
+        targetWidth: Int
+    ) {
         Handler(Looper.getMainLooper()).postDelayed({
             webView.evaluateJavascript(
                 """
@@ -134,10 +150,7 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                     var images = document.getElementsByTagName('img');
                     var loaded = true;
                     for (var i = 0; i < images.length; i++) {
-                        if (!images[i].complete) {
-                            loaded = false;
-                            break;
-                        }
+                        if (!images[i].complete) { loaded = false; break; }
                     }
                     return {
                         width: document.body.scrollWidth,
@@ -149,53 +162,45 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
             ) { value ->
                 try {
                     val json = JSONArray("[$value]").getJSONObject(0)
-                    val contentWidth = json.getDouble("width").absoluteValue.toInt()
+                    val contentWidth  = json.getDouble("width").absoluteValue.toInt()
                     val contentHeight = json.getDouble("height").absoluteValue.toInt()
-                    val fullyLoaded = json.getBoolean("fullyLoaded")
+                    val fullyLoaded   = json.getBoolean("fullyLoaded")
 
                     if (!fullyLoaded && delay < 5000) {
-                        // Retry if content (e.g., images) is not fully loaded, up to 5 seconds
+                        // Images still loading — retry up to 5 seconds total
                         checkContentRendered(webView, delay + 500, result, targetWidth)
                         return@evaluateJavascript
                     }
 
                     if (contentWidth <= 0 || contentHeight <= 0) {
-                        result.error("INVALID_SIZE", "Content size is invalid: $contentWidth x $contentHeight", null)
+                        removeFromWindow(webView)
+                        result.error("INVALID_SIZE", "Content size invalid: ${contentWidth}x${contentHeight}", null)
                         return@evaluateJavascript
                     }
 
-                    // Ensure WebView is sized correctly
+                    val w = if (targetWidth > 0) targetWidth else contentWidth
+
+                    // Resize WebView to exact content dimensions before drawing
                     webView.measure(
-                        View.MeasureSpec.makeMeasureSpec(contentWidth, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
                         View.MeasureSpec.makeMeasureSpec(contentHeight, View.MeasureSpec.EXACTLY)
                     )
-                    webView.layout(0, 0, contentWidth, contentHeight)
+                    webView.layout(0, 0, w, contentHeight)
 
-                    val bitmap = webView.toBitmap(contentWidth.toDouble(), contentHeight.toDouble())
-                    if (bitmap != null && !isBitmapWhite(bitmap)) {
+                    val bitmap = webView.toBitmap(w.toDouble(), contentHeight.toDouble())
+                    removeFromWindow(webView)
+
+                    if (bitmap != null) {
                         result.success(bitmap.toByteArray())
                     } else {
-                        result.error("BITMAP_NULL", "Failed to generate valid image", null)
+                        result.error("BITMAP_NULL", "Failed to generate image", null)
                     }
                 } catch (e: Exception) {
-                    result.error("EVALUATION_ERROR", "JavaScript evaluation failed: ${e.message}", null)
+                    removeFromWindow(webView)
+                    result.error("EVALUATION_ERROR", "JS evaluation failed: ${e.message}", null)
                 }
             }
         }, delay)
-    }
-
-    private fun isBitmapWhite(bitmap: Bitmap): Boolean {
-        // Check a sample of pixels to determine if the bitmap is mostly white/transparent
-        val pixels = IntArray(bitmap.width * bitmap.height)
-        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        var nonWhiteCount = 0
-        for (pixel in pixels) {
-            if (pixel != 0 && pixel != -1) { // Not transparent or white
-                nonWhiteCount++
-            }
-            if (nonWhiteCount > 10) return false // Early exit if enough non-white pixels
-        }
-        return true
     }
 
     @Suppress("DEPRECATION")
@@ -211,10 +216,6 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
-        webView = WebView(activity.applicationContext).apply {
-            minimumHeight = 1
-            minimumWidth = 1
-        }
     }
 
     override fun onDetachedFromActivityForConfigChanges() {}
@@ -223,31 +224,28 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
     }
 
     override fun onDetachedFromActivity() {}
+
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
     }
 }
 
 fun WebView.toBitmap(offsetWidth: Double, offsetHeight: Double): Bitmap? {
-    if (offsetHeight > 0 && offsetWidth > 0) {
-        val width = offsetWidth.absoluteValue.toInt()
-        val height = offsetHeight.absoluteValue.toInt()
-        measure(
-            View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
-        )
-        layout(0, 0, width, height)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        draw(canvas)
-        return bitmap
-    }
-    return null
+    if (offsetWidth <= 0 || offsetHeight <= 0) return null
+    val w = offsetWidth.absoluteValue.toInt()
+    val h = offsetHeight.absoluteValue.toInt()
+    measure(
+        View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+        View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY)
+    )
+    layout(0, 0, w, h)
+    val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    draw(Canvas(bitmap))
+    return bitmap
 }
 
-fun Bitmap.toByteArray(): ByteArray {
-    return ByteArrayOutputStream().use {
+fun Bitmap.toByteArray(): ByteArray =
+    ByteArrayOutputStream().use {
         compress(Bitmap.CompressFormat.PNG, 100, it)
         it.toByteArray()
     }
-}

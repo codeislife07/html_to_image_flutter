@@ -24,14 +24,20 @@ set_target_properties(${PLUGIN_NAME} PROPERTIES
   CXX_VISIBILITY_PRESET hidden)
 target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
 
+# Plugin public headers (for dependents)
 target_include_directories(${PLUGIN_NAME} INTERFACE
   "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-# WebView2 and WIL headers (bundled in windows/ alongside this CMakeLists.txt)
+# Add the plugin's own windows/ directory to the include path.
+# This makes the bundled "WebView2.h" and "WebView2EnvironmentOptions.h"
+# (located next to this CMakeLists.txt) visible to the compiler via
+# #include "WebView2.h".
 target_include_directories(${PLUGIN_NAME} PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}")
 
-# WebView2Loader import library + DLL (x64 only; ARM/x86 can be added similarly)
+# ── WebView2Loader (bundled) ─────────────────────────────────────────────────
+# The loader DLL is required to call CreateCoreWebView2EnvironmentWithOptions.
+# It discovers and loads the system-installed WebView2 Runtime at runtime.
 add_library(WebView2Loader SHARED IMPORTED GLOBAL)
 set_target_properties(WebView2Loader PROPERTIES
   IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/libs/x64/WebView2Loader.dll"
@@ -42,7 +48,7 @@ target_link_libraries(${PLUGIN_NAME} PRIVATE
   flutter_wrapper_plugin
   WebView2Loader)
 
-# Bundle WebView2Loader.dll next to the executable so it is found at runtime
+# Bundle WebView2Loader.dll next to the app executable so it is found at runtime
 set(html_to_image_flutter_bundled_libraries
   "$<TARGET_FILE:WebView2Loader>"
   PARENT_SCOPE
@@ -68,8 +74,7 @@ if(${include_${PROJECT_NAME}_tests})
   )
   apply_standard_settings(${TEST_RUNNER})
   target_include_directories(${TEST_RUNNER} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-  target_link_libraries(${TEST_RUNNER} PRIVATE flutter_wrapper_plugin)
-  target_link_libraries(${TEST_RUNNER} PRIVATE gtest_main gmock)
+  target_link_libraries(${TEST_RUNNER} PRIVATE flutter_wrapper_plugin gtest_main gmock)
   add_custom_command(TARGET ${TEST_RUNNER} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${FLUTTER_LIBRARY}" $<TARGET_FILE_DIR:${TEST_RUNNER}>
