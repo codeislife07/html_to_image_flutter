@@ -9,6 +9,9 @@ documentation: https://github.com/codeislife07/html_to_image_flutter/blob/main/R
 platforms:
   android:
   ios:
+  macos:
+  windows:
+  linux:
 
 environment:
   sdk: ^3.5.4
