@@ -1,3 +1,11 @@
+## 2.2.0
+
+* Added offline-first HTML rendering support documentation
+ - Convert in-memory HTML and bundled asset HTML without requiring network access
+ - Keep Android captures working when remote images, fonts, or other subresources fail while offline
+ - Document recommended offline usage patterns for inline CSS, local assets, and data URI images
+ - Updated package tests for the current `HtmlToImage` API before publishing
+
 ## 1.1.0
 
 * Improved plugin compatibility and rendering reliability

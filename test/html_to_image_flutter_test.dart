@@ -1,29 +1,31 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html_to_image_flutter/html_to_image_flutter.dart';
-import 'package:html_to_image_flutter/html_to_image_flutter_platform_interface.dart';
-import 'package:html_to_image_flutter/html_to_image_flutter_method_channel.dart';
-import 'package:plugin_platform_interface/plugin_platform_interface.dart';
-
-class MockHtmlToImageFlutterPlatform
-    with MockPlatformInterfaceMixin
-    implements HtmlToImageFlutterPlatform {
-
-  @override
-  Future<String?> getPlatformVersion() => Future.value('42');
-}
 
 void main() {
-  final HtmlToImageFlutterPlatform initialPlatform = HtmlToImageFlutterPlatform.instance;
+  TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('$MethodChannelHtmlToImageFlutter is the default instance', () {
-    expect(initialPlatform, isInstanceOf<MethodChannelHtmlToImageFlutter>());
+  const channel = MethodChannel('html_to_image_flutter');
+
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (methodCall) async {
+      expect(methodCall.method, 'convertToImage');
+      return Uint8List.fromList([7, 8, 9]);
+    });
   });
 
-  test('getPlatformVersion', () async {
-    HtmlToImageFlutter htmlToImageFlutterPlugin = HtmlToImageFlutter();
-    MockHtmlToImageFlutterPlatform fakePlatform = MockHtmlToImageFlutterPlatform();
-    HtmlToImageFlutterPlatform.instance = fakePlatform;
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+  });
 
-    expect(await htmlToImageFlutterPlugin.getPlatformVersion(), '42');
+  test('HtmlToImage converts HTML content through the default platform',
+      () async {
+    final bytes = await HtmlToImage.convertToImage(
+      content: '<strong>Offline ready</strong>',
+    );
+
+    expect(bytes, [7, 8, 9]);
   });
 }

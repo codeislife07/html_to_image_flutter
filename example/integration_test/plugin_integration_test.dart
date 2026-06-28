@@ -1,25 +1,16 @@
-// This is a basic Flutter integration test.
-//
-// Since integration tests run in a full Flutter application, they can interact
-// with the host side of a plugin implementation, unlike Dart unit tests.
-//
-// For more information about Flutter integration tests, please see
-// https://flutter.dev/to/integration-testing
-
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:integration_test/integration_test.dart';
-
 import 'package:html_to_image_flutter/html_to_image_flutter.dart';
+import 'package:integration_test/integration_test.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('getPlatformVersion test', (WidgetTester tester) async {
-    final HtmlToImageFlutter plugin = HtmlToImageFlutter();
-    final String? version = await plugin.getPlatformVersion();
-    // The version string depends on the host platform running the test, so
-    // just assert that some non-empty string is returned.
-    expect(version?.isNotEmpty, true);
+  testWidgets('converts offline HTML content to image bytes', (_) async {
+    final bytes = await HtmlToImage.convertToImage(
+      content: '<div style="padding:12px;background:white">Offline</div>',
+      width: 240,
+    );
+
+    expect(bytes, isNotEmpty);
   });
 }

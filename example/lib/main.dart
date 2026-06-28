@@ -1,7 +1,6 @@
-import 'package:flutter/material.dart';
-import 'dart:async';
+import 'dart:typed_data';
 
-import 'package:flutter/services.dart';
+import 'package:flutter/material.dart';
 import 'package:html_to_image_flutter/html_to_image_flutter.dart';
 
 void main() {
@@ -16,46 +15,50 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  String _platformVersion = 'Unknown';
-  final _htmlToImageFlutterPlugin = HtmlToImageFlutter();
+  Uint8List? _imageBytes;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    initPlatformState();
+    _convertOfflineHtml();
   }
 
-  // Platform messages are asynchronous, so we initialize in an async method.
-  Future<void> initPlatformState() async {
-    String platformVersion;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    // We also handle the message potentially returning null.
+  Future<void> _convertOfflineHtml() async {
     try {
-      platformVersion =
-          await _htmlToImageFlutterPlugin.getPlatformVersion() ?? 'Unknown platform version';
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
+      final bytes = await HtmlToImage.convertToImage(
+        content: '''
+          <div style="width:320px;padding:20px;background:white;color:#111;font-family:Arial">
+            <h2 style="margin:0 0 8px">Offline receipt</h2>
+            <p style="margin:0">Rendered from local HTML content.</p>
+          </div>
+        ''',
+        width: 320,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _imageBytes = bytes;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error.toString();
+      });
     }
-
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
-    if (!mounted) return;
-
-    setState(() {
-      _platformVersion = platformVersion;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Plugin example app'),
-        ),
+        appBar: AppBar(title: const Text('Plugin example app')),
         body: Center(
-          child: Text('Running on: $_platformVersion\n'),
+          child: _error != null
+              ? Text(_error!)
+              : _imageBytes == null
+              ? const CircularProgressIndicator()
+              : Image.memory(_imageBytes!),
         ),
       ),
     );
