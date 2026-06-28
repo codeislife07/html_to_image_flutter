@@ -126,6 +126,14 @@ class HtmlToImageFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler,
                     request: WebResourceRequest?,
                     error: WebResourceError?
                 ) {
+                    // Missing remote subresources are expected while offline.
+                    // Keep rendering the in-memory HTML instead of failing the
+                    // entire conversion because an image/font is unavailable.
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                        request?.isForMainFrame == false
+                    ) {
+                        return
+                    }
                     removeFromWindow(webView)
                     result.error("WEBVIEW_ERROR", "Failed to load: ${error?.description}", null)
                 }
