@@ -1,3 +1,9 @@
+## 2.2.1
+
+* Added Swift Package Manager support for iOS and macOS
+ - Enables future Flutter versions that will require SPM
+ - Maintains backward compatibility with CocoaPods
+
 ## 2.2.0
 
 * Added offline-first HTML rendering support documentation
